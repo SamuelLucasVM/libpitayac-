@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using AOT;
 using Pitaya;
 using Pitaya.SimpleJson;
+using Pitaya.NativeImpl;
 using Protos;
 
 //typedef void (*request_callback)(pc_client_t* client, unsigned int cbid, const char* resp);
@@ -201,7 +202,7 @@ namespace Pitaya
 
         private static void InitializeNativeLib()
         {
-            NativeLibInit((int)_currentLogLevel, null, null, OnAssert, Platform(), BuildNumber(), Application.version);
+            StaticPitayaBindingCS.PcUnityLibInit((int)_currentLogLevel, null, null, OnAssert, Platform(), BuildNumber(), Application.version);
             IsNativeLibInitialized = true;
         }
         
@@ -209,7 +210,7 @@ namespace Pitaya
         {
             if (!IsNativeLibInitialized) InitializeNativeLib();
             
-            var client = NativeCreate(enableTls, enablePolling, enableReconnect, connTimeout);
+            var client = StaticPitayaBindingCS.PcUnityCreate(enableTls, enablePolling, enableReconnect, connTimeout);
             if (client == IntPtr.Zero)
             {
                 throw new Exception("Fail to create a client");
