@@ -118,5 +118,24 @@ namespace Pitaya.NativeImpl
             "PC_EV_RECONNECT_FAILED",
             "PC_EV_RECONNECT_STARTED"
         };
+
+        public static readonly string[] RcStrings = {
+            "PC_RC_OK",
+            "PC_RC_ERROR",
+            "PC_RC_TIMEOUT",
+            "PC_RC_INVALID_JSON",
+            "PC_RC_INVALID_ARG",
+            "PC_RC_NO_TRANS",
+            "PC_RC_INVALID_THREAD",
+            "PC_RC_TRANS_ERROR",
+            "PC_RC_INVALID_ROUTE",
+            "PC_RC_INVALID_STATE",
+            "PC_RC_NOT_FOUND",
+            "PC_RC_RESET",
+            "PC_RC_SERVER_ERROR",
+            "PC_RC_UV_ERROR",
+            "PC_RC_NO_SUCH_FILE",
+            ""
+        };
     }
 }

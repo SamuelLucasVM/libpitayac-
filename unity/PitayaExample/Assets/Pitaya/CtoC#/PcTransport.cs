@@ -94,6 +94,11 @@ namespace Pitaya.NativeImpl {
             return PitayaNativeConstants.EvStrings[evType];
         }
 
+        public static string PcClientRcStr(int rc) {
+            // pc_assert(rc <= 0 && rc > PC_RC_MIN);
+            return PitayaNativeConstants.RcStrings[-rc];
+        }
+
         public static void PcTransQueueResp(PcClient client, uint reqId, PcBuffer resp, PcError error)
         {
             // pc_mutex_lock(&client->event_mutex);
@@ -504,6 +509,27 @@ namespace Pitaya.NativeImpl {
             }
 
             // pc_mutex_unlock(&client->handler_mutex);
+        }
+
+        public static void PcTransPush(PcClient client, string route, PcBuffer buf)
+        {
+            // pc_assert(client);
+            if (client == null || buf.Base == null || buf.Length < 0) {
+                StaticPitayaBindingCS.PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc__trans_push - error parameters");
+                return;
+            }
+
+            if (buf.Length == 0) {
+                StaticPitayaBindingCS.PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc__trans_push - empty buffer");
+                return;
+            }
+
+            StaticPitayaBindingCS.PcLibLog(PitayaNativeConstants.PC_LOG_INFO, "pc__trans_push - route: " + route);
+
+            /* invoke handler */
+            if (client.PushHandler != null) {
+                client.PushHandler(client, route, buf);
+            }
         }
     }
 }

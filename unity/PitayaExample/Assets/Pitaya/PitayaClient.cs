@@ -15,7 +15,7 @@ namespace Pitaya
         
         private const int DEFAULT_CONNECTION_TIMEOUT = 30;
 
-        private IntPtr _client = IntPtr.Zero;
+        private PcClient _client = null;
         private EventManager _eventManager;
         private bool _disposed;
         private uint _reqUid;
@@ -274,7 +274,7 @@ namespace Pitaya
             _binding.Disconnect(_client);
             _binding.Dispose(_client);
 
-            _client = IntPtr.Zero;
+            _client = null;
             _disposed = true;
         }
 

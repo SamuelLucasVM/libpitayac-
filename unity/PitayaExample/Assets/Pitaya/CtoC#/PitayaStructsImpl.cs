@@ -6,12 +6,39 @@ namespace Pitaya.NativeImpl
 {
     public class PcMutex
     {
-        public PcMutex() {
-            this.Mutex = new Mutex();
-        }
-        public Mutex Mutex { get; }
-    }
+        private Mutex mutex;
 
+        public PcMutex()
+        {
+            mutex = new Mutex();
+        }
+
+        public void Lock()
+        {
+            try
+            {
+                mutex.WaitOne();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error locking mutex: {ex.Message}");
+                throw;
+            }
+        }
+
+        public void Unlock()
+        {
+            try
+            {
+                mutex.ReleaseMutex();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error unlocking mutex: {ex.Message}");
+                throw;
+            }
+        }
+    }
 
     public enum PcLocalStorageOperation
     {
@@ -171,7 +198,7 @@ namespace Pitaya.NativeImpl
         public IntPtr ExData { get; set; }
     }
 
-    public delegate void PcPushHandlerCallback(PcClient client, string route, PcBuffer payload);
+    public delegate void PcPushHandlerCallbackDelegate (PcClient client, string route, PcBuffer payload);
     public class PcClient
     {
         public PcMutex StateMutex { get; set; }
@@ -190,7 +217,7 @@ namespace Pitaya.NativeImpl
         public PcNotify[] Notifications { get; set; } = new PcNotify[PitayaNativeConstants.PC_PRE_ALLOC_NOTIFY_SLOT_COUNT];
         public Queue<PcNotify> NotificationQueue { get; set; }
 
-        public PcPushHandlerCallback PushHandler { get; set; }
+        public PcPushHandlerCallbackDelegate PushHandler { get; set; }
 
         public PcMutex RequestMutex { get; set; }
         public uint RequestIdSequence { get; set; }
@@ -223,6 +250,10 @@ namespace Pitaya.NativeImpl
         public string BuildNumber;
         public string Version;
     }
+
+    public delegate IntPtr PcAllocDelegate(int size);
+    public delegate void PcFreeDelegate(IntPtr ptr);
+    public delegate IntPtr PcReallocDelegate(IntPtr ptr, int size);
 
     public delegate void CustomAssertDelegate(IntPtr e, IntPtr file, int line);
 

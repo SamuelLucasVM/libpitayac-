@@ -30,7 +30,7 @@ namespace Pitaya.NativeImpl
         //     }
         // }
 
-        public static void PcClientSetPushHandler(ref PcClient client, PcPushHandlerCallback cb)
+        public static void PcClientSetPushHandler(ref PcClient client, PcPushHandlerCallbackDelegate cb)
         {
             client.PushHandler = cb;
         }
@@ -76,10 +76,10 @@ namespace Pitaya.NativeImpl
 
             PcDefaultLogLevel = logLevel;
 
-            PcLibInit(CustomLogger.DefaultLog, clientInfo);
+            PcLibInit(CustomLogger.DefaultLog, null, null, null, clientInfo);
 
-            #if PC_NO_UV_TLS_TRANS
-                if (caFile || caPath) {
+            #if (!PC_NO_UV_TLS_TRANS)
+                if (caFile != null || caPath != null) {
                     // TrUvTlsSetCaFile(caFile, caPath);
                 }
             #endif
@@ -131,7 +131,7 @@ namespace Pitaya.NativeImpl
             return PitayaNativeConstants.PC_RC_OK;
         }
 
-        public static void PcLibInit(CustomLogDelegate pcLog, PcLibClientInfo clientInfo) {
+        public static void PcLibInit(CustomLogDelegate pcLog, PcAllocDelegate pcAlloc, PcFreeDelegate pcFree, PcReallocDelegate pcRealloc, PcLibClientInfo clientInfo) {
             if(PcInitiateded == 1) {
                 return; // init function already called
             }
@@ -173,7 +173,7 @@ namespace Pitaya.NativeImpl
         // #endif
         }
 
-        public static IntPtr PcUnityCreate(bool enableTls, bool enablePoll, bool enableReconnect, int connTimeout) {
+        public static PcClient PcUnityCreate(bool enableTls, bool enablePoll, bool enableReconnect, int connTimeout) {
             // Assert(connTimeout >= 0);
 
             PcClientInitResult res = new PcClientInitResult{ReturnCode = 0};
@@ -200,13 +200,10 @@ namespace Pitaya.NativeImpl
 
             res = PcClientInit(IntPtr.Zero, config);
             if (res.ReturnCode == PitayaNativeConstants.PC_RC_OK) {
-                GCHandle handle = GCHandle.Alloc(res.Client);
-                IntPtr response = (IntPtr) handle;
-                handle.Free();
-                return response;
+                return res.Client;
             }
 
-            return IntPtr.Zero;
+            return null;
         } 
 
         private static PcTransportPlugin PcGetTransportPlugin(int transName)
@@ -334,6 +331,172 @@ namespace Pitaya.NativeImpl
 
             // pc_lib_log(PitayaNativeConstants.PC_LOG_DEBUG, "pc_client_init - init ok");
             return res;
+        }
+
+        public static int PcClientState(PcClient client)
+        {
+            int state;
+
+            if (client == null) {
+                PcLibLog(PitayaNativeConstants.PC_LOG_DEBUG, "pc_client_state - client is null");
+                return PitayaNativeConstants.PC_ST_UNKNOWN;
+            }
+
+            // pc_mutex_lock(&client->state_mutex);
+            state = client.State;
+            // pc_mutex_unlock(&client->state_mutex);
+
+            return state;
+        }
+
+        public static int PcClientConnect(PcClient client, string host, int port, string handshakeOpts)
+        {
+            int state;
+            int ret;
+
+            if (client == null || host == null || port < 0 || port > (1 << 16) - 1) {
+                PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc_client_connect - invalid args");
+                return PitayaNativeConstants.PC_RC_INVALID_ARG;
+            }
+
+            if (client.Config.EnablePolling) {
+                PcClientPoll(client);
+            }
+
+            state = PcClientState(client);
+            switch(state) {
+                case PitayaNativeConstants.PC_ST_DISCONNECTING:
+                    PcLibLog(PC_LOG_ERROR, "pc_client_connect - invalid state, state: %s", pc_client_state_str(state));
+                    return PitayaNativeConstants.PC_RC_INVALID_STATE;
+
+                case PitayaNativeConstants.PC_ST_CONNECTED:
+                case PitayaNativeConstants.PC_ST_CONNECTING:
+                    PcLibLog(PitayaNativeConstants.PC_LOG_INFO, "pc_client_connect - client already connecting or connected");
+                    return PitayaNativeConstants.PC_RC_OK;
+
+                case PitayaNativeConstants.PC_ST_INITED:
+                    // pc_assert(client->trans && client->trans->connect);
+
+                    // pc_mutex_lock(&client->state_mutex);
+                    client.State = PitayaNativeConstants.PC_ST_CONNECTING; 
+                    // pc_mutex_unlock(&client->state_mutex);
+
+                    ret = client.Trans.Connect(client.Trans, host, port, handshakeOpts);
+
+                    if (ret != PitayaNativeConstants.PC_RC_OK) {
+                        PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc_client_connect - transport connect error, rc: " + pc_client_rc_str(ret));
+                        // pc_mutex_lock(&client->state_mutex);
+                        client.State = PitayaNativeConstants.PC_ST_INITED;
+                        // pc_mutex_unlock(&client->state_mutex);
+                    }
+
+                    return ret;
+                }
+            PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc_client_connect - unknown client state found, state: " + state);
+            return PitayaNativeConstants.PC_RC_ERROR;
+        }
+
+        public static int PcClientPoll(PcClient client)
+        {
+            PcEvent ev = new PcEvent();
+            Queue<dynamic> q = new Queue<dynamic>();
+
+            if (client == null) {
+                PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc_client_poll - client is null");
+                return PitayaNativeConstants.PC_RC_INVALID_ARG;
+            }
+
+            if (client.Config.EnablePolling) {
+                PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc_client_poll - client did not enable polling");
+                return PitayaNativeConstants.PC_RC_ERROR;
+            }
+
+            // pc_mutex_lock(&client->event_mutex);
+
+            /*
+            * `is_in_poll` is used to avoid recursive invocation of pc_client_poll
+            * by identical thread as `pc_mutex_t` is recursive.
+            *
+            * `is_in_poll` can be protected by `event_mutex` too, so no extra mutex
+            * is needed here.
+            */
+            if (!client.IsInPoll) {
+                client.IsInPoll = true;
+
+                while(client.PendingEventQueue.Count != 0) {
+                    PcEvent ev = client.PendingEvQueue.Dequeue();
+
+                    // pc_assert((PC_IS_PRE_ALLOC(ev->type) && PC_PRE_ALLOC_IS_BUSY(ev->type)) || PC_IS_DYN_ALLOC(ev->type));
+
+                    PcHandleEvent(client, ev);
+                }
+                client.IsInPoll = false;
+            }
+
+            // pc_mutex_unlock(&client->event_mutex);
+
+            return PitayaNativeConstants.PC_RC_OK;
+        }
+
+        public static bool IsResp(int type)
+        {
+            return (type & PitayaNativeConstants.PC_EV_TYPE_MASK) == PitayaNativeConstants.PC_EV_TYPE_RESP;
+        }
+
+        public static bool IsNotifySent(int type) {
+            return (type & PitayaNativeConstants.PC_EV_TYPE_MASK == PitayaNativeConstants.PC_EV_TYPE_NOTIFY_SENT);
+        }
+
+        public static bool IsPush(int type) {
+            return (type & PitayaNativeConstants.PC_EV_TYPE_MASK == PitayaNativeConstants.PC_EV_TYPE_PUSH);
+        }
+
+        public static void PreAllocSetIdle(ref int type)
+        {
+            type &= ~PcConstants.PC_PRE_ALLOC_ST_MASK;
+            type |= PcConstants.PC_PRE_ALLOC_ST_IDLE;
+        }
+
+        private static void PcHandleEvent(PcClient client, PcEvent ev)
+        {
+            // pc_assert(PC_EV_IS_RESP(ev->type) || PC_EV_IS_NOTIFY_SENT(ev->type) || PC_EV_IS_NET_EVENT(ev->type));
+
+            if (IsResp(ev.Type)) {
+                PcTransResp(client, ev.Data.Req.ReqId, ev.Data.Req.Resp, ev.Data.Req.Error);
+                PcLibLog(PitayaNativeConstants.PC_LOG_DEBUG, "pc__handle_event - fire pending trans resp, req_id: " + ev.Data.Req.ReqId);
+
+                // pc__error_free(&ev->data.req.error);
+
+                // pc_lib_free((char* )ev->data.req.resp.base);
+                ev.Data.Req.Resp.Base = null;
+                ev.Data.Req.Resp.Len = -1;
+
+            } else if (IsNotifySent(ev.Type)) {
+                PcTransSent(client, ev.Data.Notify.SeqNum, ev.Data.Notify.Error);
+                PcLibLog(PitayaNativeConstants.PC_LOG_DEBUG, "pc__handle_event - fire pending trans sent, seq_num: " + ev.Data.Notify.SeqNum + ", rc: " + ev.Data.Notify.Error.Code);
+
+                // pc__error_free(&ev->data.notify.error);
+            } else if (IsPush(ev.Type)) {
+                PcTransPush(client, ev.Data.Push.Route, ev.Data.Push.Buf);
+
+                PcLibLog(PitayaNativeConstants.PC_LOG_DEBUG, "pc__handle_event - fire pending trans sent, seq_num: " + ev.Data.Notify.SeqNum + ", rc: " + ev.Data.Notify.Error.Code);
+
+                // pc_lib_free((char*)ev->data.push.route);
+            } else {
+                PcTransFireEvent(client, ev.Data.Ev.EvType, ev.Data.Ev.Arg1, ev.Data.Ev.Arg2);
+                PcLibLog(PitayaNativeConstants.PC_LOG_DEBUG, "pc__handle_event - fire pending trans event: " + PcClientEvStr(ev.Data.Ev.EvType) + ", arg1: " + ev.Data.Ev.Arg1 != null ? ev.Data.Ev.Arg1 : "");
+                // pc_lib_free((char* )ev->data.ev.arg1);
+                // pc_lib_free((char* )ev->data.ev.arg2);
+
+                ev.Data.Ev.Arg1 = null;
+                ev.Data.Ev.Arg2 = null;
+            }
+
+            if (PC_IS_DYN_ALLOC(ev.type)) {
+                // pc_lib_free(ev);
+            } else {
+                PreAllocSetIdle(ref ev.Type);
+            }
         }
 
     }

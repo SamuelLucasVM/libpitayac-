@@ -54,17 +54,17 @@ namespace Pitaya
     public interface IPitayaBinding
     {
         IPitayaQueueDispatcher QueueDispatcher { get; set; }
-        IntPtr CreateClient(bool enableTls, bool enablePolling, bool enableReconnect, int connTimeout, IPitayaListener listener);
-        void Connect(IntPtr client, string host, int port, string handshakeOpts);
-        void Disconnect(IntPtr client);
+        PcClient CreateClient(bool enableTls, bool enablePolling, bool enableReconnect, int connTimeout, IPitayaListener listener);
+        void Connect(PcClient client, string host, int port, string handshakeOpts);
+        void Disconnect(PcClient client);
         void SetCertificateName(string name);
         void SetCertificatePath(string path);
-        void Request(IntPtr client, string route, byte[] msg, uint reqtId, int timeout);
-        void Notify(IntPtr client, string route, byte[] msg, int timeout);
-        int Quality(IntPtr client);
-        PitayaClientState State(IntPtr client);
-        void Dispose(IntPtr client);
-        ProtobufSerializer.SerializationFormat ClientSerializer(IntPtr client);
+        void Request(PcClient client, string route, byte[] msg, uint reqtId, int timeout);
+        void Notify(PcClient client, string route, byte[] msg, int timeout);
+        int Quality(PcClient client);
+        PitayaClientState State(PcClient client);
+        void Dispose(PcClient client);
+        ProtobufSerializer.SerializationFormat ClientSerializer(PcClient client);
         void AddPinnedPublicKeyFromCertificateString(string caString);
         void AddPinnedPublicKeyFromCertificateFile(string name);
         void SkipKeyPinCheck(bool shouldSkip);
@@ -79,18 +79,18 @@ namespace Pitaya
             set => StaticPitayaBinding.QueueDispatcher = value;
         }
 
-        public IntPtr CreateClient(bool enableTls, bool enablePolling, bool enableReconnect, int connTimeout, IPitayaListener listener) { return StaticPitayaBinding.CreateClient(enableTls, enablePolling, enableReconnect, connTimeout, listener); }
+        public PcClient CreateClient(bool enableTls, bool enablePolling, bool enableReconnect, int connTimeout, IPitayaListener listener) { return StaticPitayaBinding.CreateClient(enableTls, enablePolling, enableReconnect, connTimeout, listener); }
         public void SetLogLevel(PitayaLogLevel logLevel) { StaticPitayaBinding.SetLogLevel(logLevel); }
-        public void Connect(IntPtr client, string host, int port, string handshakeOpts) { StaticPitayaBinding.Connect(client, host, port, handshakeOpts); }
-        public void Disconnect(IntPtr client) { StaticPitayaBinding.Disconnect(client); }
+        public void Connect(PcClient client, string host, int port, string handshakeOpts) { StaticPitayaBinding.Connect(client, host, port, handshakeOpts); }
+        public void Disconnect(PcClient client) { StaticPitayaBinding.Disconnect(client); }
         public void SetCertificateName(string name) { StaticPitayaBinding.SetCertificateName(name); }
         public void SetCertificatePath(string path) { StaticPitayaBinding.SetCertificatePath(path); }
-        public void Request(IntPtr client, string route, byte[] msg, uint reqtId, int timeout) { StaticPitayaBinding.Request(client, route, msg, reqtId, timeout); }
-        public void Notify(IntPtr client, string route, byte[] msg, int timeout) { StaticPitayaBinding.Notify(client, route, msg, timeout); }
-        public int Quality(IntPtr client) { return StaticPitayaBinding.Quality(client); }
-        public PitayaClientState State(IntPtr client) { return StaticPitayaBinding.State(client); }
-        public void Dispose(IntPtr client) { StaticPitayaBinding.Dispose(client); }
-        public ProtobufSerializer.SerializationFormat ClientSerializer(IntPtr client) { return StaticPitayaBinding.ClientSerializer(client); }
+        public void Request(PcClient client, string route, byte[] msg, uint reqtId, int timeout) { StaticPitayaBinding.Request(client, route, msg, reqtId, timeout); }
+        public void Notify(PcClient client, string route, byte[] msg, int timeout) { StaticPitayaBinding.Notify(client, route, msg, timeout); }
+        public int Quality(PcClient client) { return StaticPitayaBinding.Quality(client); }
+        public PitayaClientState State(PcClient client) { return StaticPitayaBinding.State(client); }
+        public void Dispose(PcClient client) { StaticPitayaBinding.Dispose(client); }
+        public ProtobufSerializer.SerializationFormat ClientSerializer(PcClient client) { return StaticPitayaBinding.ClientSerializer(client); }
         public void AddPinnedPublicKeyFromCertificateString(string caString) { StaticPitayaBinding.AddPinnedPublicKeyFromCertificateString(caString); }
         public void AddPinnedPublicKeyFromCertificateFile(string name) { StaticPitayaBinding.AddPinnedPublicKeyFromCertificateFile(name); }
         public void SkipKeyPinCheck(bool shouldSkip) { StaticPitayaBinding.SkipKeyPinCheck(shouldSkip); }
@@ -101,12 +101,12 @@ namespace Pitaya
     {
         private static readonly NativeNotifyCallback NativeNotifyCallback;
         private static readonly NativeRequestCallback NativeRequestCallback;
-        private static readonly NativeEventCallback NativeEventCallback;
-        private static readonly NativePushCallback NativePushCallback;
+        private static readonly PcEventCallbackDelegate NativeEventCallback;
+        private static readonly PcPushHandlerCallbackDelegate NativePushCallback;
         private static readonly NativeErrorCallback NativeErrorCallback;
 
-        private static readonly Dictionary<IntPtr, WeakReference> Listeners = new Dictionary<IntPtr, WeakReference>();
-        private static readonly Dictionary<IntPtr, int> EventHandlersIds = new Dictionary<IntPtr, int>();
+        private static readonly Dictionary<PcClient, WeakReference> Listeners = new Dictionary<PcClient, WeakReference>();
+        private static readonly Dictionary<PcClient, int> EventHandlersIds = new Dictionary<PcClient, int>();
         private static PitayaLogLevel _currentLogLevel = PitayaLogLevel.Disable;
         private static bool IsNativeLibInitialized;
         
@@ -206,18 +206,18 @@ namespace Pitaya
             IsNativeLibInitialized = true;
         }
         
-        public static IntPtr CreateClient(bool enableTls, bool enablePolling, bool enableReconnect, int connTimeout, IPitayaListener listener)
+        public static PcClient CreateClient(bool enableTls, bool enablePolling, bool enableReconnect, int connTimeout, IPitayaListener listener)
         {
             if (!IsNativeLibInitialized) InitializeNativeLib();
             
             var client = StaticPitayaBindingCS.PcUnityCreate(enableTls, enablePolling, enableReconnect, connTimeout);
-            if (client == IntPtr.Zero)
+            if (client == null)
             {
                 throw new Exception("Fail to create a client");
             }
 
-            var handlerId = NativeAddEventHandler(client, NativeEventCallback, IntPtr.Zero, IntPtr.Zero);
-            NativeAddPushHandler(client, NativePushCallback);
+            var handlerId = StaticPitayaBindingCS.PcClientAddEvHandler(client, NativeEventCallback, IntPtr.Zero, null);
+            StaticPitayaBindingCS.PcClientSetPushHandler(ref client, NativePushCallback);
             Listeners[client] = new WeakReference(listener);
             EventHandlersIds[client] = handlerId;
 
@@ -230,7 +230,7 @@ namespace Pitaya
             _currentLogLevel = logLevel;
         }
 
-        public static void Connect(IntPtr client, string host, int port, string handshakeOpts)
+        public static void Connect(PcClient client, string host, int port, string handshakeOpts)
         {
             CheckClient(client);
             var opts = string.IsNullOrEmpty(handshakeOpts) ? null : handshakeOpts;
@@ -246,7 +246,7 @@ namespace Pitaya
             }
         }
 
-        public static void Disconnect(IntPtr client)
+        public static void Disconnect(PcClient client)
         {
             CheckClient(client);
             NativeDisconnect(client);
@@ -263,7 +263,7 @@ namespace Pitaya
             NativeSetCertificatePath(path, null);
         }
 
-        public static void Request(IntPtr client, string route, byte[] msg, uint reqtId, int timeout)
+        public static void Request(PcClient client, string route, byte[] msg, uint reqtId, int timeout)
         {
             var length = 0;
             if (msg != null)
@@ -283,7 +283,7 @@ namespace Pitaya
             }
         }
 
-        public static void Notify(IntPtr client, string route, byte[] msg, int timeout)
+        public static void Notify(PcClient client, string route, byte[] msg, int timeout)
         {
             var length = 0;
             if (msg != null)
@@ -292,19 +292,19 @@ namespace Pitaya
             NativeBinaryNotify(client, route, msg, length, IntPtr.Zero, timeout, NativeNotifyCallback);
         }
 
-        public static int Quality(IntPtr client)
+        public static int Quality(PcClient client)
         {
             CheckClient(client);
             return NativeQuality(client);
         }
 
-        public static PitayaClientState State(IntPtr client)
+        public static PitayaClientState State(PcClient client)
         {
             CheckClient(client);
             return (PitayaClientState)NativeState(client);
         }
 
-        public static void Dispose(IntPtr client)
+        public static void Dispose(PcClient client)
         {
             NativeRemoveEventHandler(client, EventHandlersIds[client]);
 
@@ -314,7 +314,7 @@ namespace Pitaya
             NativeDestroy(client);
         }
 
-        public static ProtobufSerializer.SerializationFormat ClientSerializer(IntPtr client)
+        public static ProtobufSerializer.SerializationFormat ClientSerializer(PcClient client)
         {
             IntPtr nativeSerializer = NativeSerializer(client);
             var serializer = Marshal.PtrToStringAnsi(nativeSerializer);
@@ -423,9 +423,9 @@ namespace Pitaya
 
         //-------------------------PRIVATE METHODS------------------------------//
         // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local
-        private static void CheckClient(IntPtr client)
+        private static void CheckClient(PcClient client)
         {
-            if (client == IntPtr.Zero)
+            if (client == null)
                 throw new NullReferenceException("invalid client");
         }
 
@@ -489,13 +489,11 @@ namespace Pitaya
             DLog(string.Format("OnNotify | rc={0}", RcToStr(errBinding.Code)));
         }
 
-        [MonoPInvokeCallback(typeof(NativePushCallback))]
-        private static void OnPush(IntPtr client, IntPtr routePtr, IntPtr payloadBufferPtr)
+        [MonoPInvokeCallback(typeof(PcPushHandlerCallbackDelegate))]
+        private static void OnPush(PcClient client, string route, PcBuffer buffer)
         {
-            var route = Marshal.PtrToStringAnsi(routePtr);
-            var buffer = (PitayaBuffer)Marshal.PtrToStructure(payloadBufferPtr, typeof(PitayaBuffer));
-            var rawData = new byte[buffer.Len];
-            Marshal.Copy(buffer.Data, rawData, 0, (int)buffer.Len);
+            var rawData = new byte[buffer.Length];
+            Array.Copy(buffer.Base, rawData, (int)buffer.Length);
 
             WeakReference reference;
 
@@ -512,13 +510,13 @@ namespace Pitaya
             });
         }
 
-        [MonoPInvokeCallback(typeof(NativeEventCallback))]
-        private static void OnEvent(IntPtr client, int ev, IntPtr exData, IntPtr arg1Ptr, IntPtr arg2Ptr)
+        [MonoPInvokeCallback(typeof(PcEventCallbackDelegate))]
+        private static void OnEvent(PcClient client, int evType, IntPtr exData, string arg1, string arg2)
         {
-            DLog(string.Format("OnEvent - pinvoke callback START | ev={0} client={1}", EvToStr(ev), client));
-            if (arg1Ptr != IntPtr.Zero)
+            DLog(string.Format("OnEvent - pinvoke callback START | ev={0} client={1}", evType, client));
+            if (arg1 != null)
             {
-                DLog(string.Format("OnEvent - msg={0}", Marshal.PtrToStringAnsi(arg1Ptr)));
+                DLog(string.Format("OnEvent - msg={0}", arg1));
             }
 
             WeakReference reference;
@@ -533,22 +531,22 @@ namespace Pitaya
 
             QueueDispatcher.Dispatch(() =>
             {
-                switch (ev)
+                switch (evType)
                 {
                     case PitayaConstants.PcEvConnected:
                         if (listener != null) listener.OnNetworkEvent(PitayaNetWorkState.Connected, null);
                         break;
                     case PitayaConstants.PcEvConnectError:
                     {
-                        string error = Marshal.PtrToStringAnsi(arg1Ptr);
-                        string description = Marshal.PtrToStringAnsi(arg2Ptr);
+                        string error = arg1;
+                        string description = arg2;
                         if (listener != null) listener.OnNetworkEvent(PitayaNetWorkState.FailToConnect, new NetworkError(error, description));
                         break;
                     }
                     case PitayaConstants.PcEvConnectFailed:
                     {
-                        string error = Marshal.PtrToStringAnsi(arg1Ptr);
-                        string description = Marshal.PtrToStringAnsi(arg2Ptr);
+                        string error = arg1;
+                        string description = arg2;
                         if (listener != null) listener.OnNetworkEvent(PitayaNetWorkState.FailToConnect, new NetworkError(error, description));
                         break;
                     }
@@ -563,15 +561,15 @@ namespace Pitaya
                         break;
                     case PitayaConstants.PcEvUnexpectedDisconnect:
                     {
-                        string error = Marshal.PtrToStringAnsi(arg1Ptr);
-                        string description = Marshal.PtrToStringAnsi(arg2Ptr);
+                        string error = arg1;
+                        string description = arg2;
                         if (listener != null) listener.OnNetworkEvent(PitayaNetWorkState.Disconnected, new NetworkError(error, description));
                         break;
                     }
                     case PitayaConstants.PcEvProtoError:
                     {
-                        string error = Marshal.PtrToStringAnsi(arg1Ptr);
-                        string description = Marshal.PtrToStringAnsi(arg2Ptr);
+                        string error = arg1;
+                        string description = arg2;
                         if (listener != null) listener.OnNetworkEvent(PitayaNetWorkState.Error, new NetworkError(error, description));
                         break;
                     }
