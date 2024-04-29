@@ -146,5 +146,10 @@ namespace Pitaya.NativeImpl
             "PC_ST_UNKNOWN",
             ""
         };
+        
+        /**
+        * disable timeout
+        */
+        public static readonly int PC_WITHOUT_TIMEOUT = -1;
     }
 }

@@ -545,5 +545,166 @@ namespace Pitaya.NativeImpl
             // pc_assert(client->trans);
             return client.Transport.Serializer(client.Transport);
         }
+
+        public static int PcClientDisconnect(PcClient client)
+        {
+            int state;
+            int ret;
+
+            if (client == null) {
+                PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc_client_disconnect - client is null");
+                return PitayaNativeConstants.PC_RC_INVALID_ARG;
+            }
+
+            if (client.Config.EnablePolling) {
+                PcClientPoll(client);
+            }
+
+            state = PcClientState(client);
+            switch(state) {
+                case PitayaNativeConstants.PC_ST_INITED:
+                    PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc_client_disconnect - invalid state, state: " + PcClientStateStr(state));
+                    return PitayaNativeConstants.PC_RC_INVALID_STATE;
+
+                case PitayaNativeConstants.PC_ST_CONNECTING:
+                case PitayaNativeConstants.PC_ST_CONNECTED:
+                    // pc_assert(client->trans && client->trans->disconnect);
+
+                    // pc_mutex_lock(&client->state_mutex);
+                    client.State = PitayaNativeConstants.PC_ST_DISCONNECTING;
+                    // pc_mutex_unlock(&client->state_mutex);
+
+                    ret = client.Transport.Disconnect(client.Transport);
+
+                    if (ret != PitayaNativeConstants.PC_RC_OK) {
+                        PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc_client_disconnect - transport disconnect error: " + PcClientRcStr(ret));
+                        // pc_mutex_lock(&client->state_mutex);
+                        client.State = state;
+                        // pc_mutex_unlock(&client->state_mutex);
+                    }
+                    return ret;
+
+                case PitayaNativeConstants.PC_ST_DISCONNECTING:
+                    PcLibLog(PitayaNativeConstants.PC_LOG_INFO, "pc_client_disconnect - client is already disconnecting");
+                    return PitayaNativeConstants.PC_RC_OK;
+            }
+            PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc_client_disconnect - unknown client state found, " + state);
+            return PitayaNativeConstants.PC_RC_ERROR;
+        }
+
+        public static int PcBinaryNotifyWithTimeout(PcClient client, string route, byte[] data, long len, IntPtr exData, int timeout, PcNotifyErrorCallback cb)
+        {
+            PcBuffer buf = new PcBuffer();
+            buf.Length = len;
+            // buf.Base = pc_lib_malloc(len);
+            buf.Base = data;
+            return PcNotifyWithTimeout(client, route, buf, exData, timeout, cb);
+        }
+
+        public static int PcNotifyWithTimeout(PcClient client, string route, PcBuffer msgBuf, IntPtr exData,
+                                        int timeout, PcNotifyErrorCallback cb)
+        {
+            PcNotify notify;
+            int i;
+            int ret;
+            int state;
+
+            if (client == null || route == null || msgBuf.Length == -1) {
+                // pc_assert(msgBuf.base == NULL);
+                PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc_notify_with_timeout - invalid args");
+                // pc_buf_free(&msgBuf);
+                return PitayaNativeConstants.PC_RC_INVALID_ARG;
+            }
+
+            if (timeout != PitayaNativeConstants.PC_WITHOUT_TIMEOUT && timeout <= 0) {
+                PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc_notify_with_timeout - invalid timeout value");
+                // pc_buf_free(&msgBuf);
+                return PitayaNativeConstants.PC_RC_INVALID_ARG;
+            }
+
+            state = PcClientState(client);
+            if(state != PitayaNativeConstants.PC_ST_CONNECTED && state != PitayaNativeConstants.PC_ST_CONNECTING) {
+                PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc_request_with_timeout - invalid state, state: " + PcClientStateStr(state));
+                // pc_buf_free(&msgBuf);
+                return PitayaNativeConstants.PC_RC_INVALID_STATE;
+            }
+
+            // pc_assert(client->trans && client->trans->send);
+
+            // pc_mutex_lock(&client->req_mutex);
+
+            notify = null;
+            for (i = 0; i < PitayaNativeConstants.PC_PRE_ALLOC_NOTIFY_SLOT_COUNT; i++) {
+                if (StaticPcTrans.IsIdle(client.Notifications[i].Base.Type)) {
+                    notify = client.Notifications[i];
+
+                    uint type = notify.Base.Type;
+                    StaticPcTrans.SetBusy(ref type);
+                    notify.Base.Type = type;
+
+                    PcLibLog(PitayaNativeConstants.PC_LOG_DEBUG, "pc_notify_with_timeout - use pre alloc notify");
+                    // pc_assert(!notify->base.route && !notify->base.msgBuf.base);
+                    // pc_assert(PC_IS_PRE_ALLOC(notify->base.type));
+
+                    break;
+                }
+            }
+
+            if (notify == null) {
+                notify = new PcNotify();
+
+                PcLibLog(PitayaNativeConstants.PC_LOG_DEBUG, "pc_notify_with_timeout - use dynamic alloc notify");
+                notify.Base.Type = PitayaNativeConstants.PC_REQ_TYPE_NOTIFY | PitayaNativeConstants.PC_DYN_ALLOC;
+                notify.Base.Client = client;
+            }
+
+            // QUEUE_INIT(&notify->base.queue);
+            notify.Base.Queue = new Queue<PcRequest>();
+            // QUEUE_INSERT_TAIL(&client->notify_queue, &notify->base.queue);
+            notify.Base.Queue.Enqueue(client.NotificationQueue);
+
+            notify.Base.Route = PcLibStrdup(route);
+            notify.Base.MessageBuffer = msgBuf;
+
+            notify.Base.SeqNum = client.SequenceNumber++;
+
+            notify.Base.Timeout = timeout;
+            notify.Base.ExData = exData;
+
+            notify.Callback = cb;
+
+            // pc_mutex_unlock(&client->req_mutex);
+
+            PcLibLog(PitayaNativeConstants.PC_LOG_INFO, "pc_notify_with_timeout - add notify to queue, seq num: " + notify.Base.SeqNum);
+
+            ret = client.Transport.Send(client.Transport, notify.Base.Route, notify.Base.SeqNum, 
+                notify.Base.MessageBuffer, PitayaNativeConstants.PC_NOTIFY_PUSH_REQ_ID, notify.Base.Timeout);
+
+            if (ret != PitayaNativeConstants.PC_RC_OK) {
+                PcLibLog(PitayaNativeConstants.PC_LOG_ERROR, "pc_notify_with_timeout - send to transport error, seq num: " + notify.Base.SeqNum + ", error: " + PcClientRcStr(ret));
+
+                // pc_mutex_lock(&client->req_mutex);
+
+                // pc_buf_free(&notify->base.msgBuf);
+                // pc_lib_free((char* )notify->base.route);
+
+                notify.Base.MessageBuffer.Base = null;
+                notify.Base.MessageBuffer.Length = -1;
+                notify.Base.Route = null;
+
+                notify.Base.Queue.Dequeue();
+
+                if (StaticPcTrans.IsPreAlloc(notify.Base.Type)) {
+                    uint type = notify.Base.Type;
+                    PreAllocSetIdle(ref type);
+                    notify.Base.Type = notify.Base.Type;
+                } else {
+                    // pc_lib_free(notify);
+                }
+
+                // pc_mutex_unlock(&client->req_mutex);
+            }
+            return ret;
+        }
     }
 }

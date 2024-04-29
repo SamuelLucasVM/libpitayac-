@@ -99,7 +99,7 @@ namespace Pitaya
 
     public static class StaticPitayaBinding
     {
-        private static readonly NativeNotifyCallback NativeNotifyCallback;
+        private static readonly PcNotifyErrorCallback NativeNotifyCallback;
         private static readonly RequestCallback NativeRequestCallback;
         private static readonly PcEventCallbackDelegate NativeEventCallback;
         private static readonly PcPushHandlerCallbackDelegate NativePushCallback;
@@ -221,7 +221,7 @@ namespace Pitaya
             Listeners[client] = new WeakReference(listener);
             EventHandlersIds[client] = handlerId;
 
-            return client;
+            return null;
         }
 
         public static void SetLogLevel(PitayaLogLevel logLevel)
@@ -232,28 +232,24 @@ namespace Pitaya
 
         public static void Connect(PcClient client, string host, int port, string handshakeOpts)
         {
-            // TODO - LoadTest
+            CheckClient(client);
+            var opts = string.IsNullOrEmpty(handshakeOpts) ? null : handshakeOpts;
 
-            // CheckClient(client);
-            // var opts = string.IsNullOrEmpty(handshakeOpts) ? null : handshakeOpts;
-
-            // switch (NativeConnect(client, host, port, opts))
-            // {
-            //     case PitayaConstants.PcRcOk:
-            //         return;
-            //     case PitayaConstants.PcRcInvalidJson:
-            //         throw new Exception("Cannot connect: invalid handshake options json data");
-            //     default:
-            //         throw new Exception("Error when Connect was called");
-            // }
+            switch (StaticPitayaBindingCS.PcClientConnect(client, host, port, opts))
+            {
+                case PitayaConstants.PcRcOk:
+                    return;
+                case PitayaConstants.PcRcInvalidJson:
+                    throw new Exception("Cannot connect: invalid handshake options json data");
+                default:
+                    throw new Exception("Error when Connect was called");
+            }
         }
 
         public static void Disconnect(PcClient client)
         {
-            // TODO - LoadTest
-
-            // CheckClient(client);
-            // NativeDisconnect(client);
+            CheckClient(client);
+            StaticPitayaBindingCS.PcClientDisconnect(client);
         }
 
         public static void SetCertificateName(string name)
@@ -291,13 +287,11 @@ namespace Pitaya
 
         public static void Notify(PcClient client, string route, byte[] msg, int timeout)
         {
-            // TODO - LoadTest
+            var length = 0;
+            if (msg != null)
+                length = msg.Length;
 
-            // var length = 0;
-            // if (msg != null)
-            //     length = msg.Length;
-
-            // NativeBinaryNotify(client, route, msg, length, IntPtr.Zero, timeout, NativeNotifyCallback);
+            StaticPitayaBindingCS.PcBinaryNotifyWithTimeout(client, route, msg, length, IntPtr.Zero, timeout, NativeNotifyCallback);
         }
 
         public static int Quality(PcClient client)
@@ -488,11 +482,10 @@ namespace Pitaya
         }
 
 
-        [MonoPInvokeCallback(typeof(NativeNotifyCallback))]
-        private static void OnNotify(IntPtr req, IntPtr error)
+        [MonoPInvokeCallback(typeof(PcNotifyErrorCallback))]
+        private static void OnNotify(PcNotify req, PcError error)
         {
-            var errBinding = (PitayaBindingError)Marshal.PtrToStructure(error, typeof(PitayaBindingError));
-            DLog(string.Format("OnNotify | rc={0}", RcToStr(errBinding.Code)));
+            DLog(string.Format("OnNotify | rc={0}", RcToStr(error.Code)));
         }
 
         [MonoPInvokeCallback(typeof(PcPushHandlerCallbackDelegate))]
