@@ -100,10 +100,10 @@ namespace Pitaya
     public static class StaticPitayaBinding
     {
         private static readonly NativeNotifyCallback NativeNotifyCallback;
-        private static readonly NativeRequestCallback NativeRequestCallback;
+        private static readonly RequestCallback NativeRequestCallback;
         private static readonly PcEventCallbackDelegate NativeEventCallback;
         private static readonly PcPushHandlerCallbackDelegate NativePushCallback;
-        private static readonly NativeErrorCallback NativeErrorCallback;
+        private static readonly RequestErrorCallback NativeErrorCallback;
 
         private static readonly Dictionary<PcClient, WeakReference> Listeners = new Dictionary<PcClient, WeakReference>();
         private static readonly Dictionary<PcClient, int> EventHandlersIds = new Dictionary<PcClient, int>();
@@ -232,24 +232,28 @@ namespace Pitaya
 
         public static void Connect(PcClient client, string host, int port, string handshakeOpts)
         {
-            CheckClient(client);
-            var opts = string.IsNullOrEmpty(handshakeOpts) ? null : handshakeOpts;
+            // TODO - LoadTest
 
-            switch (NativeConnect(client, host, port, opts))
-            {
-                case PitayaConstants.PcRcOk:
-                    return;
-                case PitayaConstants.PcRcInvalidJson:
-                    throw new Exception("Cannot connect: invalid handshake options json data");
-                default:
-                    throw new Exception("Error when Connect was called");
-            }
+            // CheckClient(client);
+            // var opts = string.IsNullOrEmpty(handshakeOpts) ? null : handshakeOpts;
+
+            // switch (NativeConnect(client, host, port, opts))
+            // {
+            //     case PitayaConstants.PcRcOk:
+            //         return;
+            //     case PitayaConstants.PcRcInvalidJson:
+            //         throw new Exception("Cannot connect: invalid handshake options json data");
+            //     default:
+            //         throw new Exception("Error when Connect was called");
+            // }
         }
 
         public static void Disconnect(PcClient client)
         {
-            CheckClient(client);
-            NativeDisconnect(client);
+            // TODO - LoadTest
+
+            // CheckClient(client);
+            // NativeDisconnect(client);
         }
 
         public static void SetCertificateName(string name)
@@ -265,60 +269,65 @@ namespace Pitaya
 
         public static void Request(PcClient client, string route, byte[] msg, uint reqtId, int timeout)
         {
-            var length = 0;
-            if (msg != null)
-                length = msg.Length;
+            // TODO - LoadTest
 
-            var rc = NativeBinaryRequest(client, route, msg, length, reqtId, timeout, NativeRequestCallback, NativeErrorCallback);
+            // var length = 0;
+            // if (msg != null)
+            //     length = msg.Length;
 
-            if (rc != PitayaConstants.PcRcOk)
-            {
-                var rcStr = RcToStr(rc);
-                DLog(string.Format("request - failed to perform request {0}", rcStr));
+            // var rc = NativeBinaryRequest(client, route, msg, length, reqtId, timeout, NativeRequestCallback, NativeErrorCallback);
 
-                WeakReference reference;
-                if (!Listeners.TryGetValue(client, out reference) || !reference.IsAlive) return;
-                var listener = reference.Target as IPitayaListener;
-                if (listener != null) listener.OnRequestError(reqtId, new PitayaError(rcStr, "Failed to send request"));
-            }
+            // if (rc != PitayaConstants.PcRcOk)
+            // {
+            //     var rcStr = RcToStr(rc);
+            //     DLog(string.Format("request - failed to perform request {0}", rcStr));
+
+            //     WeakReference reference;
+            //     if (!Listeners.TryGetValue(client, out reference) || !reference.IsAlive) return;
+            //     var listener = reference.Target as IPitayaListener;
+            //     if (listener != null) listener.OnRequestError(reqtId, new PitayaError(rcStr, "Failed to send request"));
+            // }
         }
 
         public static void Notify(PcClient client, string route, byte[] msg, int timeout)
         {
-            var length = 0;
-            if (msg != null)
-                length = msg.Length;
+            // TODO - LoadTest
 
-            NativeBinaryNotify(client, route, msg, length, IntPtr.Zero, timeout, NativeNotifyCallback);
+            // var length = 0;
+            // if (msg != null)
+            //     length = msg.Length;
+
+            // NativeBinaryNotify(client, route, msg, length, IntPtr.Zero, timeout, NativeNotifyCallback);
         }
 
         public static int Quality(PcClient client)
         {
             CheckClient(client);
-            return NativeQuality(client);
+            return StaticPitayaBindingCS.PcClientConnQuality(client);
         }
 
         public static PitayaClientState State(PcClient client)
         {
             CheckClient(client);
-            return (PitayaClientState)NativeState(client);
+            return (PitayaClientState)StaticPitayaBindingCS.PcClientState(client);
         }
 
         public static void Dispose(PcClient client)
         {
-            NativeRemoveEventHandler(client, EventHandlersIds[client]);
+            // TODO - LoadTest
 
-            Listeners.Remove(client);
-            EventHandlersIds.Remove(client);
+            // NativeRemoveEventHandler(client, EventHandlersIds[client]);
 
-            NativeDestroy(client);
+            // Listeners.Remove(client);
+            // EventHandlersIds.Remove(client);
+
+            // NativeDestroy(client);
         }
 
         public static ProtobufSerializer.SerializationFormat ClientSerializer(PcClient client)
         {
-            IntPtr nativeSerializer = NativeSerializer(client);
-            var serializer = Marshal.PtrToStringAnsi(nativeSerializer);
-            NativeFreeSerializer(nativeSerializer);
+            var serializer = StaticPitayaBindingCS.PcClientSerializer(client);
+            // NativeFreeSerializer(nativeSerializer);
             return PitayaConstants.SerializerJson.Equals(serializer) ? ProtobufSerializer.SerializationFormat.Json : ProtobufSerializer.SerializationFormat.Protobuf;
         }
 
@@ -390,10 +399,10 @@ namespace Pitaya
             return certPath;
         }
 
-        private static PitayaError CreatePitayaError(PitayaBindingError errorBinding, ProtobufSerializer.SerializationFormat format)
+        private static PitayaError CreatePitayaError(PcError pcError, ProtobufSerializer.SerializationFormat format)
         {
-            var rawData = new byte[errorBinding.Buffer.Len];
-            Marshal.Copy(errorBinding.Buffer.Data, rawData, 0, (int)errorBinding.Buffer.Len);
+            var rawData = new byte[pcError.Payload.Length];
+            Array.Copy(pcError.Payload.Base, rawData, (int)pcError.Payload.Length);
 
             if (format == ProtobufSerializer.SerializationFormat.Protobuf)
             {
@@ -440,9 +449,8 @@ namespace Pitaya
         }
 
         [MonoPInvokeCallback(typeof(NativeErrorCallback))]
-        private static void OnError(IntPtr client, uint rid, IntPtr errorPtr)
+        private static void OnError(PcClient client, uint rid, PcError errBinding)
         {
-            var errBinding = (PitayaBindingError)Marshal.PtrToStructure(errorPtr, typeof(PitayaBindingError));
             PitayaError error;
 
             if (errBinding.Code == PitayaConstants.PcRcServerError)
@@ -465,12 +473,10 @@ namespace Pitaya
         }
 
         [MonoPInvokeCallback(typeof(NativeRequestCallback))]
-        private static void OnRequest(IntPtr client, uint rid, IntPtr respPtr)
+        private static void OnRequest(PcClient client, uint rid, PcBuffer buffer)
         {
-            var buffer = (PitayaBuffer)Marshal.PtrToStructure(respPtr, typeof(PitayaBuffer));
-
-            var rawData = new byte[buffer.Len];
-            Marshal.Copy(buffer.Data, rawData, 0, (int)buffer.Len);
+            var rawData = new byte[buffer.Length];
+            Array.Copy(buffer.Base, rawData, (int)buffer.Length);
 
             QueueDispatcher.Dispatch(() =>
             {

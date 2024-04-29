@@ -152,12 +152,12 @@ namespace Pitaya.NativeImpl
     public abstract class EventData { }
     public class NotifyEventData : EventData
     {
-        public int SeqNum { get; set; }
+        public uint SeqNum { get; set; }
         public PcError Error { get; set; }
     }
     public class RequestEventData : EventData
     {
-        public int ReqId { get; set; }
+        public uint ReqId { get; set; }
         public PcError Error { get; set; }
         public PcBuffer Resp { get; set; }
     }
@@ -226,7 +226,7 @@ namespace Pitaya.NativeImpl
 
         public PcMutex EventMutex { get; set; }
         public PcEvent[] PendingEvents { get; set; } = new PcEvent[PitayaNativeConstants.PC_PRE_ALLOC_EVENT_SLOT_COUNT];
-        public Queue<dynamic> PendingEventQueue { get; set; }
+        public Queue<PcEvent> PendingEventQueue { get; set; }
         public bool IsInPoll { get; set; }
     }
 
@@ -322,4 +322,7 @@ namespace Pitaya.NativeImpl
         public int HandlerId { get; set; }
         public PcEventCallbackDelegate Callback { get; set; }
     }
+
+    public delegate void RequestErrorCallback (PcClient client, uint cbid, PcError error);
+    public delegate void RequestCallback (PcClient client, uint cbid, PcBuffer resp);
 }

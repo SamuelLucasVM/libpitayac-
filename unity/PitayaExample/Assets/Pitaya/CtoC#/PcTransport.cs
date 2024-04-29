@@ -94,11 +94,6 @@ namespace Pitaya.NativeImpl {
             return PitayaNativeConstants.EvStrings[evType];
         }
 
-        public static string PcClientRcStr(int rc) {
-            // pc_assert(rc <= 0 && rc > PC_RC_MIN);
-            return PitayaNativeConstants.RcStrings[-rc];
-        }
-
         public static void PcTransQueueResp(PcClient client, uint reqId, PcBuffer resp, PcError error)
         {
             // pc_mutex_lock(&client->event_mutex);
@@ -130,14 +125,14 @@ namespace Pitaya.NativeImpl {
 
             ev.Queue = new Queue<dynamic>();
             if (ev.Data is RequestEventData requestEventData) {
-                requestEventData.ReqId = (int)reqId;
+                requestEventData.ReqId = reqId;
                 requestEventData.Resp = PcBufferCopy(resp);
                 requestEventData.Error = PcErrorDup(error);
             }
 
 
             // QUEUE_INSERT_TAIL(&client->pending_ev_queue, &ev->queue);
-            client.PendingEventQueue.Enqueue(ev.Queue);
+            client.PendingEventQueue.Enqueue(ev);
 
             // pc_mutex_unlock(&client->event_mutex);
         }
@@ -260,11 +255,11 @@ namespace Pitaya.NativeImpl {
             ev.Type = eventType;
 
             if (ev.Data is NotifyEventData notifyEventData) {
-                notifyEventData.SeqNum = (int)seqNum;
+                notifyEventData.SeqNum = seqNum;
                 notifyEventData.Error = PcErrorDup(error);
             }
 
-            client.PendingEventQueue.Enqueue(ev.Queue);
+            client.PendingEventQueue.Enqueue(ev);
 
             // pc_mutex_unlock(&client->event_mutex);
         }
@@ -439,7 +434,7 @@ namespace Pitaya.NativeImpl {
                 }
             }
 
-            StaticPitayaBindingCS.PcLibLog(PitayaNativeConstants.PC_LOG_INFO, "pc__trans_fire_event - fire event: " + PcClientEvStr(evType) + ", arg1: " + arg1 != null ? arg1 : "" + ", arg2: " + arg2 != null ? arg2 : "");
+            StaticPitayaBindingCS.PcLibLog(PitayaNativeConstants.PC_LOG_INFO, "pc__trans_fire_event - fire event: " + StaticPcTrans.PcClientEvStr(evType) + ", arg1: " + arg1 != null ? arg1 : "" + ", arg2: " + arg2 != null ? arg2 : "");
             // pc_mutex_lock(&client.State_mutex); 
             switch(evType) {
                 case PitayaNativeConstants.PC_EV_CONNECTED:

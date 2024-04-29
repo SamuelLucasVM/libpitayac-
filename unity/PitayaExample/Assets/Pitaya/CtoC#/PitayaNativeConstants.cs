@@ -92,12 +92,12 @@ namespace Pitaya.NativeImpl
         /**
         * client state
         */
-        public static readonly int PC_ST_INITED = 0;
-        public static readonly int PC_ST_CONNECTING = 1;
-        public static readonly int PC_ST_CONNECTED = 2;
-        public static readonly int PC_ST_DISCONNECTING = 3;
-        public static readonly int PC_ST_UNKNOWN = 4;
-        public static readonly int PC_ST_COUNT = 5;
+        public const int PC_ST_INITED = 0;
+        public const int PC_ST_CONNECTING = 1;
+        public const int PC_ST_CONNECTED = 2;
+        public const int PC_ST_DISCONNECTING = 3;
+        public const int PC_ST_UNKNOWN = 4;
+        public const int PC_ST_COUNT = 5;
 
         /**
         * special request id
@@ -135,6 +135,15 @@ namespace Pitaya.NativeImpl
             "PC_RC_SERVER_ERROR",
             "PC_RC_UV_ERROR",
             "PC_RC_NO_SUCH_FILE",
+            ""
+        };
+
+        public static readonly string[] StateStrings = {
+            "PC_ST_INITED",
+            "PC_ST_CONNECTING",
+            "PC_ST_CONNECTED",
+            "PC_ST_DISCONNECTING",
+            "PC_ST_UNKNOWN",
             ""
         };
     }
